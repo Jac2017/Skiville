@@ -1,0 +1,18 @@
+{
+  "name": "skiville",
+  "version": "1.0.0",
+  "description": "Ski Resort Tycoon - Whistler Blackcomb simulation game",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "cesium": "^1.121.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "vite-plugin-cesium": "^1.2.23"
+  }
+}

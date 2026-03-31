@@ -78,7 +78,7 @@ export class TerrainEngine {
   async init() {
     // Use the built-in Cesium Ion default access token.
     // Replace with your own token for production use.
-    Cesium.Ion.defaultAccessToken = Cesium.Ion.defaultAccessToken || 'YOUR_CESIUM_ION_ACCESS_TOKEN';
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzYzYzNS0wYjQyLTRlMGYtYWFmYi03YmFhMTQzNTFiM2YiLCJpZCI6NDA5NTYwLCJpYXQiOjE3NzQ5Nzc1NTd9.EDmasSi2FWla5znlEiDkuqhZXJ0X4l1ILo8Hlj2GoYY';
 
     this.viewer = new Cesium.Viewer('cesium-container', {
       terrainProvider: await Cesium.createWorldTerrainAsync({

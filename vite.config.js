@@ -3,6 +3,7 @@ import cesium from 'vite-plugin-cesium';
 
 export default defineConfig({
   plugins: [cesium()],
+  base: '/Skiville/',
   server: {
     port: 3000,
     open: true

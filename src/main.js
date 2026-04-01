@@ -48,9 +48,6 @@ function setLoadingText(msg) {
 function hideLoadingScreen() {
   return new Promise((resolve) => {
     const screen = document.getElementById('loading-screen');
-    const game   = document.getElementById('game-container');
-
-    if (game) game.style.display = 'block';
 
     if (!screen) { resolve(); return; }
 
@@ -63,7 +60,10 @@ function hideLoadingScreen() {
     }, { once: true });
 
     // Safety fallback in case transitionend never fires
-    setTimeout(resolve, 800);
+    setTimeout(() => {
+      screen.style.display = 'none';
+      resolve();
+    }, 800);
   });
 }
 
@@ -127,7 +127,12 @@ function showCesiumFallback(err) {
     let cesiumOk  = false;
 
     try {
-      viewer   = await terrain.init();
+      // Race against a timeout so we don't hang on broken WebGL / network
+      const initPromise = terrain.init();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Terrain initialization timed out after 15s')), 15000)
+      );
+      viewer   = await Promise.race([initPromise, timeoutPromise]);
       cesiumOk = true;
     } catch (cesiumErr) {
       console.warn('CesiumJS failed to initialise — running without 3D terrain.', cesiumErr);
@@ -305,11 +310,8 @@ function showCesiumFallback(err) {
     setLoadingProgress(100);
     setLoadingText('Error — see console for details.');
 
-    // Still show the UI so the player isn't stuck on a blank loading screen
+    // Hide loading screen so the player sees the fallback UI
     const screen = document.getElementById('loading-screen');
-    const game   = document.getElementById('game-container');
-
-    if (game)   game.style.display = 'block';
     if (screen) screen.style.display = 'none';
 
     showCesiumFallback(err);

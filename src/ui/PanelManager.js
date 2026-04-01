@@ -1,3 +1,8 @@
+import { BuildPanelRenderer } from './BuildPanelRenderer.js';
+import { OperationsPanelRenderer } from './OperationsPanelRenderer.js';
+import { UpgradePanelRenderer } from './UpgradePanelRenderer.js';
+import { EventPanelRenderer } from './EventPanelRenderer.js';
+
 /**
  * PanelManager - Manages the side panel UI for all toolbar tools.
  * Generates context-specific HTML content for lifts, runs, facilities,
@@ -53,6 +58,8 @@ export class PanelManager {
       restaurants: 'Dining', shops: 'Retail & Rentals', condos: 'Condos',
       parking: 'Parking', staff: 'Staff', finance: 'Finances',
       marketing: 'Marketing & Passes', settings: 'Settings',
+      build: 'Build Mode', upgrades: 'Upgrades', events: 'Events & Challenges',
+      activities: 'Activities', avalanche: 'Avalanche Control',
     };
     return titles[tool] || 'Details';
   }
@@ -73,6 +80,14 @@ export class PanelManager {
       finance: () => this._renderFinance(gs),
       marketing: () => this._renderMarketing(gs),
       settings: () => this._renderSettings(gs),
+      build: () => BuildPanelRenderer.renderBuildPanel(gs, this._buildSystem) + BuildPanelRenderer.renderConstructionQueue(this._buildSystem),
+      upgrades: () => UpgradePanelRenderer.renderUpgradePanel(gs, this._upgrades),
+      events: () => EventPanelRenderer.renderEventsPanel(gs, this._events),
+      activities: () => this._renderActivities(gs),
+      avalanche: () => {
+        const ops = this._operations;
+        return ops && OperationsPanelRenderer.renderAvalanche ? OperationsPanelRenderer.renderAvalanche(gs, ops) : '<p>Not available.</p>';
+      },
     };
     return (r[tool] || (() => '<p>Select a category.</p>'))();
   }
@@ -500,6 +515,25 @@ export class PanelManager {
         }
       });
     }
+  }
+
+  // ── Activities ──
+  _renderActivities(gs) {
+    const sys = this._activities;
+    if (!sys) return '<p>Activities not available.</p>';
+    const built = sys.getBuiltActivities?.() || [];
+    const available = sys.getAvailableActivities?.(gs) || [];
+    let html = '<div class="panel-section"><div class="panel-section-title">Active Activities (' + built.length + ')</div>';
+    if (built.length === 0) html += '<p style="font-size:12px;opacity:0.5">No activities built yet</p>';
+    built.forEach(a => {
+      html += `<div class="facility-item"><div class="facility-header"><span class="facility-name">${this._esc(a.name)}</span><span class="stat-value ${a.active ? 'stat-positive' : 'stat-negative'}">${a.active ? 'Open' : 'Closed'}</span></div></div>`;
+    });
+    html += '</div><div class="panel-section"><div class="panel-section-title">Available to Build (' + available.length + ')</div>';
+    available.forEach(a => {
+      html += `<div class="upgrade-card"><div class="upgrade-card-header"><span class="upgrade-name">${this._esc(a.name)}</span><span class="upgrade-cost">${this._money(a.buildCost)}</span></div><div class="upgrade-desc">${this._esc(a.description || '')}</div><div class="upgrade-effects">Revenue: ${this._money(a.dailyRevenue)}/day | Cap: ${a.guestCapacity}</div></div>`;
+    });
+    html += '</div>';
+    return html;
   }
 
   // ── Helpers ──

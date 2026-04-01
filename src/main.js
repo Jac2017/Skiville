@@ -1,96 +1,70 @@
 /**
  * main.js — SkiVille entry point.
- *
- * Wires together all game systems: terrain rendering, entity display,
- * HUD, panels, and the core game engine. Handles loading sequencing,
- * event plumbing, keyboard shortcuts, and first-launch startup.
- *
- * Side-effect module — exports nothing.
+ * Wires together all game systems, renderers, and UI.
  */
 
-import { GameEngine }    from './engine/GameEngine.js';
+import { GameEngine } from './engine/GameEngine.js';
 import { TerrainEngine } from './rendering/TerrainEngine.js';
 import { EntityRenderer } from './rendering/EntityRenderer.js';
-import { HudManager }    from './ui/HudManager.js';
-import { PanelManager }  from './ui/PanelManager.js';
+import { RunRenderer } from './rendering/RunRenderer.js';
+import { LiftAnimator } from './rendering/LiftAnimator.js';
+import { GuestVisualizer } from './rendering/GuestVisualizer.js';
+import { VisualEffectsRenderer } from './rendering/VisualEffectsRenderer.js';
+import { HudManager } from './ui/HudManager.js';
+import { PanelManager } from './ui/PanelManager.js';
+import { BuildSystem } from './engine/BuildSystem.js';
+import { OperationsSystem } from './engine/OperationsSystem.js';
+import { UpgradeSystem } from './engine/UpgradeSystem.js';
+import { EventSystem } from './engine/EventSystem.js';
+import { ActivitySystem } from './engine/ActivitySystem.js';
+import { FinanceTracker } from './engine/FinanceTracker.js';
+import { generateRunCoords } from './data/runCoords.js';
 import {
-  LIFTS,
-  RUNS,
-  HOTELS,
-  RESTAURANTS,
-  BARS,
-  SHOPS,
-  CONDOS,
-  PARKING,
-  RESORT_CONFIG,
+  LIFTS, RUNS, HOTELS, RESTAURANTS, BARS, SHOPS, CONDOS, PARKING, RESORT_CONFIG,
 } from './data/index.js';
 
 // ---------------------------------------------------------------------------
-// Loading screen helpers
+// Loading helpers
 // ---------------------------------------------------------------------------
 
-/** @param {number} pct  0-100 */
 function setLoadingProgress(pct) {
   const bar = document.getElementById('loading-bar');
   if (bar) bar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
 }
 
-/** @param {string} msg */
 function setLoadingText(msg) {
   const el = document.getElementById('loading-text');
   if (el) el.textContent = msg;
 }
 
-/**
- * Fade out the loading screen and reveal the game container.
- * @returns {Promise<void>}
- */
 function hideLoadingScreen() {
   return new Promise((resolve) => {
     const screen = document.getElementById('loading-screen');
-
     if (!screen) { resolve(); return; }
-
     screen.style.transition = 'opacity 0.6s ease';
-    screen.style.opacity    = '0';
-
+    screen.style.opacity = '0';
     screen.addEventListener('transitionend', () => {
       screen.style.display = 'none';
       resolve();
     }, { once: true });
-
-    // Safety fallback in case transitionend never fires
-    setTimeout(() => {
-      screen.style.display = 'none';
-      resolve();
-    }, 800);
+    setTimeout(() => { screen.style.display = 'none'; resolve(); }, 800);
   });
 }
-
-// ---------------------------------------------------------------------------
-// Cesium fallback — show dark background when Ion token is missing
-// ---------------------------------------------------------------------------
 
 function showCesiumFallback(err) {
   const container = document.getElementById('cesium-container');
   if (container) {
-    container.style.background =
-      'linear-gradient(135deg, #0d1520 0%, #1a2a3a 40%, #253545 100%)';
+    container.style.background = 'linear-gradient(135deg, #0d1520 0%, #1a2a3a 40%, #253545 100%)';
     container.style.display = 'flex';
     container.style.alignItems = 'center';
     container.style.justifyContent = 'center';
-
     const msg = document.createElement('div');
-    msg.style.cssText =
-      'color:#4a90d9;font-family:sans-serif;text-align:center;padding:2rem;max-width:420px';
+    msg.style.cssText = 'color:#4a90d9;font-family:sans-serif;text-align:center;padding:2rem;max-width:420px';
     msg.innerHTML = `
       <p style="font-size:2rem;margin:0 0 .5rem">🏔️</p>
-      <p style="font-size:1.1rem;font-weight:bold;margin:0 0 .75rem">
-        3D Terrain Unavailable
-      </p>
+      <p style="font-size:1.1rem;font-weight:bold;margin:0 0 .75rem">3D Terrain Unavailable</p>
       <p style="font-size:.875rem;opacity:.8;margin:0 0 1rem">
-        CesiumJS could not load the terrain viewer. Set a valid
-        <code>CESIUM_ION_ACCESS_TOKEN</code> to enable 3D terrain.
+        CesiumJS could not load. The game will run without 3D terrain.
       </p>
       <p style="font-size:.75rem;opacity:.55">${err?.message ?? ''}</p>
     `;
@@ -99,236 +73,251 @@ function showCesiumFallback(err) {
 }
 
 // ---------------------------------------------------------------------------
-// Main async IIFE
+// Main
 // ---------------------------------------------------------------------------
 
 (async () => {
-  // ── 0 · Boot ─────────────────────────────────────────────────────────────
   setLoadingProgress(0);
   setLoadingText('Initializing game engine…');
 
   try {
-    // ── 1 · Game Engine ────────────────────────────────────────────────────
+    // ── 1. Game Engine + Data ──
     const engine = new GameEngine();
-    const state  = engine.state;
-
-    // Seed resort data from static data files
-    state.resort.lifts     = LIFTS;
-    state.resort.runs      = RUNS;
+    const state = engine.state;
+    state.resort.lifts = LIFTS;
+    state.resort.runs = RUNS;
     state.resort.buildings = [...HOTELS, ...RESTAURANTS, ...BARS, ...SHOPS];
-    state.resort.name      = RESORT_CONFIG.name;
+    state.resort.name = RESORT_CONFIG.name;
+
+    // ── 2. Engine subsystems ──
+    const buildSystem = new BuildSystem();
+    const operations = new OperationsSystem();
+    const upgrades = new UpgradeSystem();
+    const events = new EventSystem();
+    const activities = new ActivitySystem();
+    const finance = new FinanceTracker();
+
+    // Attach to engine for access
+    engine.buildSystem = buildSystem;
+    engine.operations = operations;
+    engine.upgrades = upgrades;
+    engine.events = events;
+    engine.activities = activities;
+    engine.finance = finance;
 
     setLoadingProgress(15);
-    setLoadingText('Loading terrain data…');
+    setLoadingText('Loading terrain…');
 
-    // ── 2 · Terrain Engine ─────────────────────────────────────────────────
+    // ── 3. Terrain Engine ──
     const terrain = new TerrainEngine();
-    let viewer    = null;
-    let cesiumOk  = false;
+    let viewer = null;
+    let cesiumOk = false;
 
     try {
-      // Race against a timeout so we don't hang on broken WebGL / network
       const initPromise = terrain.init();
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Terrain initialization timed out after 15s')), 15000)
+        setTimeout(() => reject(new Error('Terrain timed out after 15s')), 15000)
       );
-      viewer   = await Promise.race([initPromise, timeoutPromise]);
+      viewer = await Promise.race([initPromise, timeoutPromise]);
       cesiumOk = true;
     } catch (cesiumErr) {
-      console.warn('CesiumJS failed to initialise — running without 3D terrain.', cesiumErr);
+      console.warn('CesiumJS failed:', cesiumErr);
       showCesiumFallback(cesiumErr);
     }
+
+    setLoadingProgress(35);
+    setLoadingText('Generating run coordinates…');
+
+    // ── 4. Run GPS Coordinates ──
+    const runCoordsMap = generateRunCoords(LIFTS, RUNS);
 
     setLoadingProgress(45);
     setLoadingText('Building resort entities…');
 
-    // ── 3 · Entity Renderer ────────────────────────────────────────────────
+    // ── 5. Renderers ──
     const entities = new EntityRenderer(viewer);
     entities.init({
-      lifts:     LIFTS,
-      runs:      RUNS,
+      lifts: LIFTS,
+      runs: RUNS,
       buildings: [...HOTELS, ...RESTAURANTS, ...BARS, ...SHOPS],
-      condos:    CONDOS,
-      parking:   PARKING,
+      condos: CONDOS,
+      parking: PARKING,
     });
 
-    setLoadingProgress(65);
-    setLoadingText('Building HUD…');
+    const runRenderer = new RunRenderer(viewer);
+    runRenderer.init(runCoordsMap, RUNS);
 
-    // ── 4 · HUD Manager ────────────────────────────────────────────────────
+    const liftAnimator = new LiftAnimator(viewer);
+    liftAnimator.init(LIFTS);
+
+    const guestViz = new GuestVisualizer(viewer);
+    guestViz.init(LIFTS);
+
+    const visualFx = new VisualEffectsRenderer(viewer);
+    visualFx.init(LIFTS);
+
+    setLoadingProgress(70);
+    setLoadingText('Building UI…');
+
+    // ── 6. UI ──
     const hud = new HudManager();
     hud.init();
 
-    setLoadingProgress(80);
-    setLoadingText('Preparing panels…');
-
-    // ── 5 · Panel Manager ─────────────────────────────────────────────────
     const panels = new PanelManager();
     panels.init();
 
-    setLoadingProgress(95);
-    setLoadingText('Starting simulation…');
+    // Attach extra systems to panels for access in render methods
+    panels._buildSystem = buildSystem;
+    panels._operations = operations;
+    panels._upgrades = upgrades;
+    panels._events = events;
+    panels._activities = activities;
+    panels._finance = finance;
 
-    // ── 6 · Wire events ───────────────────────────────────────────────────
+    setLoadingProgress(90);
+    setLoadingText('Wiring events…');
 
-    // HUD speed/pause controls → engine
+    // ── 7. Event Wiring ──
+
+    // Speed controls
     hud.on('speedChange', ({ action, speed }) => {
       if (action === 'pause') {
-        if (engine.state.paused) {
-          engine.resume();
-        } else {
-          engine.pause();
-        }
+        engine.state.paused ? engine.resume() : engine.pause();
       } else if (action === 'setSpeed') {
         engine.setSpeed(speed);
         if (engine.state.paused) engine.resume();
       }
     });
 
-    // HUD tool selection → panel
+    // Tool selection
     hud.on('toolSelected', ({ tool }) => {
       panels.showPanel(tool, engine.getState());
     });
 
-    // Engine update → all renderers
-    engine.on('update', (updatedState) => {
-      hud.update(updatedState);
-      hud.drawMinimap(updatedState);
-      entities.update(updatedState);
-      panels.update(updatedState);
+    // Main update loop
+    engine.on('update', (s) => {
+      // UI updates
+      hud.update(s);
+      hud.drawMinimap(s);
+      panels.update(s);
+
+      // Subsystem updates
+      buildSystem.updateConstruction(1 / 60); // rough dt in days
+      operations.update(s, 1);
+      upgrades.update(1);
+      events.update(s, 1);
+      activities.update(s, 1);
+
+      // Renderer updates
+      entities.update(s);
+      runRenderer.update(s);
+      liftAnimator.update(s);
+      guestViz.update(s);
+      visualFx.update(s);
 
       if (cesiumOk) {
-        terrain.update({
-          time:    updatedState.time.hour,
-          weather: updatedState.weather,
-        });
+        terrain.update({ time: s.time.hour, weather: s.weather });
       }
     });
 
-    // Daily financial report notification
+    // Daily/monthly reports
     engine.on('dailyReport', (report) => {
-      const net    = (report.revenue ?? 0) - (report.expenses ?? 0);
-      const sign   = net >= 0 ? '+' : '';
-      const type   = net >= 0 ? 'success' : 'warning';
-      const fmt    = (n) => `$${Math.abs(Math.round(n)).toLocaleString('en-US')}`;
+      const net = (report.revenue ?? 0) - (report.expenses ?? 0);
+      const fmt = (n) => `$${Math.abs(Math.round(n)).toLocaleString('en-US')}`;
       hud.showNotification(
-        type,
+        net >= 0 ? 'success' : 'warning',
         'Daily Report',
-        `Revenue: ${fmt(report.revenue)}  |  Expenses: ${fmt(report.expenses)}  |  Net: ${sign}${fmt(net)}`,
+        `Revenue: ${fmt(report.revenue)} | Expenses: ${fmt(report.expenses)} | Net: ${net >= 0 ? '+' : ''}${fmt(net)}`,
         7000,
       );
+      finance.recordDailySnapshot(engine.getState());
     });
 
-    // Monthly P&L notification
     engine.on('monthlyReport', (report) => {
-      const revenue  = report.revenue  ?? report.totalRevenue  ?? 0;
-      const expenses = report.expenses ?? report.totalExpenses ?? 0;
-      const profit   = revenue - expenses;
-      const sign     = profit >= 0 ? '+' : '';
-      const type     = profit >= 0 ? 'success' : 'danger';
-      const fmt      = (n) => `$${Math.abs(Math.round(n)).toLocaleString('en-US')}`;
+      const rev = report.revenue ?? report.totalRevenue ?? 0;
+      const exp = report.expenses ?? report.totalExpenses ?? 0;
+      const profit = rev - exp;
+      const fmt = (n) => `$${Math.abs(Math.round(n)).toLocaleString('en-US')}`;
       hud.showNotification(
-        type,
+        profit >= 0 ? 'success' : 'danger',
         'Monthly P&L',
-        `Revenue: ${fmt(revenue)}  |  Expenses: ${fmt(expenses)}  |  Profit: ${sign}${fmt(profit)}`,
+        `Revenue: ${fmt(rev)} | Expenses: ${fmt(exp)} | Profit: ${profit >= 0 ? '+' : ''}${fmt(profit)}`,
         10000,
+      );
+      finance.recordMonthlySnapshot(engine.getState());
+    });
+
+    // Build system events
+    buildSystem.on('constructionComplete', (item) => {
+      hud.showNotification('success', 'Construction Complete', `${item.name} is ready!`, 6000);
+      // Add to resort data
+      if (item.category === 'lift') {
+        state.resort.lifts.push({ id: item.id, name: item.name, type: item.type, status: 'open', coords: { base: item.position, peak: item.position } });
+      } else {
+        state.resort.buildings.push({ id: item.id, name: item.name, type: item.type, coords: item.position });
+      }
+    });
+
+    // Event system notifications
+    events.on('eventTriggered', (event) => {
+      const isGood = event.type === 'vip-visit' || event.type === 'powder-day';
+      hud.showNotification(
+        isGood ? 'success' : 'warning',
+        event.title || 'Event',
+        event.description || '',
+        8000,
       );
     });
 
-    // Panel close button
-    const closeBtnEl = document.getElementById('panel-close');
-    if (closeBtnEl) {
-      closeBtnEl.addEventListener('click', () => panels.hidePanel());
-    }
+    // Upgrade completions
+    upgrades.on('upgradeComplete', (upgrade) => {
+      hud.showNotification('success', 'Upgrade Complete', `${upgrade.name} is now active!`, 6000);
+    });
 
-    // ── 7 · Keyboard shortcuts ────────────────────────────────────────────
+    // Panel close
+    document.getElementById('panel-close')?.addEventListener('click', () => panels.hidePanel());
+
+    // ── 8. Keyboard Shortcuts ──
     document.addEventListener('keydown', (e) => {
-      // Ignore shortcuts when the user is typing in an input
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
       switch (e.key) {
         case ' ':
           e.preventDefault();
-          if (engine.state.paused) {
-            engine.resume();
-          } else {
-            engine.pause();
-          }
+          engine.state.paused ? engine.resume() : engine.pause();
           break;
-
-        case '1':
-          engine.setSpeed(1);
-          if (engine.state.paused) engine.resume();
-          break;
-
-        case '2':
-          engine.setSpeed(2);
-          if (engine.state.paused) engine.resume();
-          break;
-
-        case '3':
-          engine.setSpeed(3);
-          if (engine.state.paused) engine.resume();
-          break;
-
-        case 'Escape':
-          panels.hidePanel();
-          hud.setActiveTool(null);
-          break;
+        case '1': engine.setSpeed(1); if (engine.state.paused) engine.resume(); break;
+        case '2': engine.setSpeed(2); if (engine.state.paused) engine.resume(); break;
+        case '3': engine.setSpeed(3); if (engine.state.paused) engine.resume(); break;
+        case 'Escape': panels.hidePanel(); hud.setActiveTool(null); break;
+        case 'b': case 'B': panels.showPanel('build', engine.getState()); break;
       }
     });
 
-    // ── 8 · Finish loading ────────────────────────────────────────────────
+    // ── 9. Finish ──
     setLoadingProgress(100);
     setLoadingText('Welcome to Skiville!');
-
     await hideLoadingScreen();
 
-    // ── 9 · Start simulation ──────────────────────────────────────────────
-    engine.start(); // loads save if present, marks paused = false internally,
-                    // but we want to start paused so the player sees the welcome
-
-    // Hold paused momentarily so the welcome notification is readable,
-    // then let the simulation run
+    engine.start();
     engine.pause();
 
     hud.showNotification(
       'success',
       'Welcome to Skiville!',
-      `Managing ${RESORT_CONFIG.name} — ${RESORT_CONFIG.skiableAcres.toLocaleString()} skiable acres. Press Space to unpause.`,
+      `Managing ${RESORT_CONFIG.name} — ${RESORT_CONFIG.skiableAcres.toLocaleString()} skiable acres. Press Space to start.`,
       8000,
     );
 
-    // Brief delay then resume
     setTimeout(() => engine.resume(), 1500);
 
   } catch (err) {
-    // ── Fatal error ───────────────────────────────────────────────────────
     console.error('SkiVille failed to initialise:', err);
-
     setLoadingProgress(100);
-    setLoadingText('Error — see console for details.');
-
-    // Hide loading screen so the player sees the fallback UI
+    setLoadingText('Error — see console.');
     const screen = document.getElementById('loading-screen');
     if (screen) screen.style.display = 'none';
-
     showCesiumFallback(err);
-
-    // Surface the error in the notification area if the HUD happened to init
-    const area = document.getElementById('notification-area');
-    if (area) {
-      const el = document.createElement('div');
-      el.className = 'notification type-danger';
-      el.innerHTML = `
-        <span class="notification-icon">❌</span>
-        <div class="notification-body">
-          <div class="notification-title">Initialization Error</div>
-          <div class="notification-message">${err?.message ?? String(err)}</div>
-        </div>
-      `;
-      area.appendChild(el);
-    }
   }
 })();
